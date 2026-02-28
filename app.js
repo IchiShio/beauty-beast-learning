@@ -1688,14 +1688,15 @@ class BBGame {
 
   _startGameLoop() {
     if (this.gameLoop) return;
-    this.lastTimestamp = 0;
+    // 再起動時は前のtsを引き継がず最初のフレームをdt=0で開始
+    let prevTs = 0;
     const loop = (ts) => {
       if (this.currentScreen !== 'game-screen') {
         this.gameLoop = null;
         return;
       }
-      const dt = Math.min((ts - (this.lastTimestamp || ts)) / 1000, 0.05);
-      this.lastTimestamp = ts;
+      const dt = prevTs ? Math.min((ts - prevTs) / 1000, 0.05) : 0;
+      prevTs = ts;
       this._updateWorld(dt);
       this._renderWorld();
       this.gameLoop = requestAnimationFrame(loop);
@@ -2024,6 +2025,14 @@ class BBGame {
     }
     this.playSe('badge');
     this._showPetals();
+    // ヘッダードットを全完了表示に更新
+    const dotsEl = document.getElementById('room-overlay-dots');
+    dotsEl.innerHTML = '';
+    roomDef.tasks.forEach(() => {
+      const d = document.createElement('div');
+      d.className = 'task-dot done';
+      dotsEl.appendChild(d);
+    });
     const content = document.getElementById('room-overlay-content');
     content.innerHTML = '';
     this._renderOverlayClearBanner(roomId, content, roomDef);
@@ -2034,30 +2043,27 @@ class BBGame {
     this._dpadBound = true;
     const btnLeft = document.getElementById('btn-dpad-left');
     const btnRight = document.getElementById('btn-dpad-right');
-    const onDown = (dir) => (e) => {
-      e.preventDefault();
-      this.input[dir] = true;
-      (dir === 'left' ? btnLeft : btnRight).classList.add('pressed');
+    const set = (dir, val) => {
+      this.input[dir] = val;
+      (dir === 'left' ? btnLeft : btnRight).classList.toggle('pressed', val);
     };
-    const onUp = (dir) => (e) => {
-      e.preventDefault();
-      this.input[dir] = false;
-      (dir === 'left' ? btnLeft : btnRight).classList.remove('pressed');
-    };
-    ['pointerdown', 'touchstart'].forEach(evt => {
-      btnLeft.addEventListener(evt, onDown('left'), { passive: false });
-      btnRight.addEventListener(evt, onDown('right'), { passive: false });
-    });
-    ['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach(evt => {
-      btnLeft.addEventListener(evt, onUp('left'), { passive: false });
-      btnRight.addEventListener(evt, onUp('right'), { passive: false });
+    [['btn-dpad-left','left'],['btn-dpad-right','right']].forEach(([id, dir]) => {
+      const btn = document.getElementById(id);
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        set(dir, true);
+      }, { passive: false });
+      btn.addEventListener('pointerup',     (e) => { e.preventDefault(); set(dir, false); }, { passive: false });
+      btn.addEventListener('pointercancel', (e) => { e.preventDefault(); set(dir, false); }, { passive: false });
+      btn.addEventListener('pointerleave',  (e) => { e.preventDefault(); set(dir, false); }, { passive: false });
     });
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowLeft') this.input.left = true;
+      if (e.key === 'ArrowLeft')  this.input.left  = true;
       if (e.key === 'ArrowRight') this.input.right = true;
     });
     window.addEventListener('keyup', (e) => {
-      if (e.key === 'ArrowLeft') this.input.left = false;
+      if (e.key === 'ArrowLeft')  this.input.left  = false;
       if (e.key === 'ArrowRight') this.input.right = false;
     });
   }
