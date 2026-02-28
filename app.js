@@ -441,6 +441,21 @@ class BBGame {
     // Recognizer
     this.recognizer = new StrokeRecognizer();
     this.isMobile = navigator.maxTouchPoints > 0;
+    // 2D game
+    this.gameLoop = null;
+    this.lastTimestamp = 0;
+    this.worldWidth = 1800;
+    this.worldX = 0;
+    this.belle = { x: 120, y: 0, vx: 0, facingRight: true, bobPhase: 0 };
+    this.input = { left: false, right: false };
+    this.nearDoor = null;
+    this.torchPhase = 0;
+    this.inGameOverlay = false;
+    this._dpadBound = false;
+    this.DOOR_POSITIONS = { ballroom:320, dining:680, library:1040, westwing:1400 };
+    this.DOOR_ZONE_RADIUS = 80;
+    this.BELLE_SPEED = 240;
+    this.BELLE_HEIGHT = 80;
   }
 
   init() {
@@ -475,7 +490,7 @@ class BBGame {
 
   // ===== SCREEN MANAGEMENT =====
   showScreen(id) {
-    const screens = ['loading-screen','title-screen','story-screen','badge-screen','map-screen','room-screen','task-screen','trace-screen'];
+    const screens = ['loading-screen','title-screen','story-screen','badge-screen','map-screen','game-screen','room-screen','task-screen','trace-screen'];
     screens.forEach(s => {
       const el = document.getElementById(s);
       if (el) el.classList.toggle('hidden', s !== id);
@@ -688,7 +703,7 @@ class BBGame {
     });
     document.getElementById('btn-continue').addEventListener('click', () => {
       this.initAudio();
-      if (this.state.module1.key_earned) this._showMap();
+      if (this.state.module1.key_earned) this._showCastle();
       else this._showStory();
     });
     document.getElementById('btn-settings-title').addEventListener('click', () => {
@@ -703,7 +718,7 @@ class BBGame {
     // Badge
     document.getElementById('btn-badge-ok').addEventListener('click', () => {
       this.playSe('unlock');
-      this._showMap();
+      this._showCastle();
     });
 
     // Map
@@ -1328,19 +1343,30 @@ class BBGame {
 
     // Check if all tasks in room done
     const allDone = roomDef.tasks.every((_, i) => !!this.state.module2.task_progress[`${this.currentRoom}_${i}`]);
-    if (allDone) {
-      setTimeout(() => {
-        this._completeRoom(this.currentRoom);
-      }, 1200);
+    const nextTaskIdx = this._getNextTaskIdx(roomDef);
+
+    if (this.inGameOverlay) {
+      // オーバーレイモード
+      if (allDone) {
+        setTimeout(() => this._completeRoomOverlay(this.currentRoom), 1200);
+      } else {
+        setTimeout(() => this._showTaskOverlay(this.currentRoom, nextTaskIdx), 1200);
+      }
     } else {
-      // Go to next task or back to room
-      const nextTask = this.currentTask + 1;
-      if (nextTask < roomDef.tasks.length) {
+      // 既存パス（task-screen）
+      if (allDone) {
         setTimeout(() => {
-          this._startTask(this.currentRoom, nextTask);
+          this._completeRoom(this.currentRoom);
         }, 1200);
       } else {
-        setTimeout(() => this._showRoom(this.currentRoom), 1200);
+        const nextTask = this.currentTask + 1;
+        if (nextTask < roomDef.tasks.length) {
+          setTimeout(() => {
+            this._startTask(this.currentRoom, nextTask);
+          }, 1200);
+        } else {
+          setTimeout(() => this._showRoom(this.currentRoom), 1200);
+        }
       }
     }
   }
@@ -1638,6 +1664,402 @@ class BBGame {
     } else {
       this._showRoom(this.currentRoom);
     }
+  }
+
+  // ===== 2D CASTLE GAME =====
+  _showCastle() {
+    this.showScreen('game-screen');
+    if (!this.currentBgm || this.currentBgm !== 'castle') this.playBgm('castle');
+    this._resizeCanvas();
+    this._bindDpad();
+    this._startGameLoop();
+  }
+
+  _resizeCanvas() {
+    const canvas = document.getElementById('game-canvas');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    const floorY = window.innerHeight * 0.72;
+    this.belle.y = floorY - this.BELLE_HEIGHT;
+  }
+
+  _startGameLoop() {
+    if (this.gameLoop) return;
+    this.lastTimestamp = 0;
+    const loop = (ts) => {
+      if (this.currentScreen !== 'game-screen') {
+        this.gameLoop = null;
+        return;
+      }
+      const dt = Math.min((ts - (this.lastTimestamp || ts)) / 1000, 0.05);
+      this.lastTimestamp = ts;
+      this._updateWorld(dt);
+      this._renderWorld();
+      this.gameLoop = requestAnimationFrame(loop);
+    };
+    this.gameLoop = requestAnimationFrame(loop);
+  }
+
+  _stopGameLoop() {
+    if (this.gameLoop) {
+      cancelAnimationFrame(this.gameLoop);
+      this.gameLoop = null;
+    }
+  }
+
+  _updateWorld(dt) {
+    if (this.inGameOverlay) return;
+    const W = window.innerWidth;
+    if (this.input.left) {
+      this.belle.x -= this.BELLE_SPEED * dt;
+      this.belle.facingRight = false;
+    }
+    if (this.input.right) {
+      this.belle.x += this.BELLE_SPEED * dt;
+      this.belle.facingRight = true;
+    }
+    this.belle.x = Math.max(40, Math.min(this.worldWidth - 40, this.belle.x));
+    if (this.input.left || this.input.right) {
+      this.belle.bobPhase += dt * 8;
+    }
+    this.worldX = Math.max(0, Math.min(this.worldWidth - W, this.belle.x - W / 2));
+    this.torchPhase += dt * 3;
+    this._checkDoorProximity();
+  }
+
+  _renderWorld() {
+    const canvas = document.getElementById('game-canvas');
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width / dpr;
+    const H = canvas.height / dpr;
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+    this._drawBackground(ctx, W, H);
+    this._drawFloor(ctx, W, H);
+    this._drawTorches(ctx, W, H);
+    this._drawDoors(ctx, W, H);
+    this._drawBelle(ctx, W, H);
+    ctx.restore();
+  }
+
+  _drawBackground(ctx, W, H) {
+    const grd = ctx.createLinearGradient(0, 0, 0, H * 0.72);
+    grd.addColorStop(0, '#0a0520');
+    grd.addColorStop(0.5, '#1a0a3e');
+    grd.addColorStop(1, '#2d1b69');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, W, H * 0.72);
+    const brickOffsetX = -(this.worldX * 0.3) % 60;
+    ctx.strokeStyle = 'rgba(60,30,90,0.4)';
+    ctx.lineWidth = 1;
+    const brickW = 60;
+    const brickH = 30;
+    for (let row = 0; row < Math.ceil(H * 0.72 / brickH) + 1; row++) {
+      const y = row * brickH;
+      const offset = (row % 2 === 0) ? 0 : brickW / 2;
+      for (let col = -1; col < Math.ceil(W / brickW) + 2; col++) {
+        const x = col * brickW + offset + brickOffsetX;
+        ctx.strokeRect(x, y, brickW, brickH);
+      }
+    }
+  }
+
+  _drawFloor(ctx, W, H) {
+    const floorY = H * 0.72;
+    const floorH = H - floorY;
+    const grd = ctx.createLinearGradient(0, floorY, 0, H);
+    grd.addColorStop(0, '#3d2f1a');
+    grd.addColorStop(1, '#1a1208');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, floorY, W, floorH);
+    const tileW = 80;
+    const tileOffsetX = -(this.worldX) % tileW;
+    ctx.strokeStyle = 'rgba(100,80,40,0.4)';
+    ctx.lineWidth = 1.5;
+    for (let col = -1; col < Math.ceil(W / tileW) + 2; col++) {
+      const x = col * tileW + tileOffsetX;
+      ctx.beginPath();
+      ctx.moveTo(x, floorY);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(200,152,10,0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, floorY);
+    ctx.lineTo(W, floorY);
+    ctx.stroke();
+  }
+
+  _drawTorches(ctx, W, H) {
+    const floorY = H * 0.72;
+    const torchWorldPositions = [180, 500, 860, 1220, 1620];
+    torchWorldPositions.forEach(worldPos => {
+      const screenX = worldPos - this.worldX;
+      if (screenX < -60 || screenX > W + 60) return;
+      const torchY = floorY * 0.45;
+      const flicker = Math.sin(this.torchPhase + worldPos * 0.01) * 0.3 + 0.7;
+      const glowRadius = 60 * flicker;
+      const grd = ctx.createRadialGradient(screenX, torchY, 0, screenX, torchY, glowRadius);
+      grd.addColorStop(0, `rgba(255,180,50,${0.25 * flicker})`);
+      grd.addColorStop(1, 'rgba(255,180,50,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(screenX, torchY, glowRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#5a3a10';
+      ctx.fillRect(screenX - 6, torchY + 5, 12, 18);
+      ctx.font = `${24 * flicker}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🔥', screenX, torchY);
+    });
+  }
+
+  _drawDoors(ctx, W, H) {
+    const floorY = H * 0.72;
+    const doorW = 70;
+    const doorH = 110;
+    ROOM_DEFS.forEach(room => {
+      const worldPos = this.DOOR_POSITIONS[room.id];
+      if (!worldPos) return;
+      const screenX = worldPos - this.worldX;
+      if (screenX < -100 || screenX > W + 100) return;
+      const x = screenX - doorW / 2;
+      const y = floorY - doorH;
+      const unlocked = this.state.module2.rooms_unlocked.includes(room.id);
+      const isNear = this.nearDoor === room.id;
+      ctx.fillStyle = isNear ? '#6b4510' : '#4a2f0a';
+      ctx.fillRect(x - 5, y - 5, doorW + 10, doorH + 5);
+      ctx.fillStyle = unlocked ? '#2a1a6a' : '#1a1a1a';
+      ctx.fillRect(x, y, doorW, doorH);
+      ctx.fillStyle = unlocked ? '#3a2a7a' : '#2a2a2a';
+      ctx.beginPath();
+      ctx.arc(screenX, y, doorW / 2, Math.PI, 0);
+      ctx.fill();
+      ctx.strokeStyle = isNear ? 'rgba(240,208,96,0.9)' : 'rgba(200,152,10,0.5)';
+      ctx.lineWidth = isNear ? 3 : 2;
+      ctx.beginPath();
+      ctx.arc(screenX, y, doorW / 2, Math.PI, 0);
+      ctx.stroke();
+      ctx.strokeRect(x, y, doorW, doorH);
+      const stars = this.state.module2.room_stars[room.id] || 0;
+      ctx.font = '28px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (!unlocked) {
+        ctx.fillText('🔒', screenX, y + doorH / 2);
+      } else if (stars >= 1) {
+        ctx.fillText('⭐', screenX, y + doorH / 2);
+      } else {
+        ctx.fillText(room.icon, screenX, y + doorH / 2);
+      }
+      ctx.font = 'bold 12px "M PLUS Rounded 1c", sans-serif';
+      ctx.fillStyle = isNear ? '#f0d060' : 'rgba(240,208,96,0.7)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(room.name, screenX, floorY + 6);
+      if (isNear) {
+        ctx.strokeStyle = `rgba(240,208,96,${0.5 + 0.3 * Math.sin(this.torchPhase * 2)})`;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x - 3, y - 3, doorW + 6, doorH + 6);
+      }
+    });
+  }
+
+  _drawBelle(ctx, W, H) {
+    const floorY = H * 0.72;
+    const belleScreenX = this.belle.x - this.worldX;
+    const bob = Math.sin(this.belle.bobPhase) * 4;
+    const belleY = floorY - this.BELLE_HEIGHT / 2 + bob;
+    ctx.save();
+    if (!this.belle.facingRight) {
+      ctx.translate(belleScreenX, belleY);
+      ctx.scale(-1, 1);
+      ctx.translate(-belleScreenX, -belleY);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(belleScreenX, floorY - 5, 25, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = `${this.BELLE_HEIGHT * 0.8}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('👸', belleScreenX, belleY);
+    ctx.restore();
+  }
+
+  _checkDoorProximity() {
+    let found = null;
+    Object.entries(this.DOOR_POSITIONS).forEach(([roomId, worldPos]) => {
+      if (Math.abs(this.belle.x - worldPos) <= this.DOOR_ZONE_RADIUS) {
+        if (this.state.module2.rooms_unlocked.includes(roomId)) {
+          found = roomId;
+        }
+      }
+    });
+    if (found !== this.nearDoor) {
+      this.nearDoor = found;
+      if (found) {
+        this._showEnterBtn(found);
+      } else {
+        this._hideEnterBtn();
+      }
+    }
+  }
+
+  _showEnterBtn(roomId) {
+    const btn = document.getElementById('enter-room-btn');
+    btn.classList.remove('hidden');
+    btn.onclick = () => this._enterRoom(roomId);
+  }
+
+  _hideEnterBtn() {
+    const btn = document.getElementById('enter-room-btn');
+    btn.classList.add('hidden');
+    btn.onclick = null;
+  }
+
+  _enterRoom(roomId) {
+    this._stopGameLoop();
+    this._hideEnterBtn();
+    this.inGameOverlay = true;
+    this.currentRoom = roomId;
+    this.currentTask = 0;
+    const roomDef = ROOM_DEFS.find(r => r.id === roomId);
+    const taskIdx = this._getNextTaskIdx(roomDef);
+    this._showTaskOverlay(roomId, taskIdx);
+  }
+
+  _getNextTaskIdx(roomDef) {
+    for (let i = 0; i < roomDef.tasks.length; i++) {
+      const key = `${roomDef.id}_${i}`;
+      if (!this.state.module2.task_progress[key]) return i;
+    }
+    return null;
+  }
+
+  _showTaskOverlay(roomId, taskIdx) {
+    const roomDef = ROOM_DEFS.find(r => r.id === roomId);
+    const overlay = document.getElementById('room-overlay');
+    overlay.classList.remove('hidden');
+    document.getElementById('room-overlay-title').textContent = `${roomDef.icon} ${roomDef.name}`;
+    const dotsEl = document.getElementById('room-overlay-dots');
+    dotsEl.innerHTML = '';
+    roomDef.tasks.forEach((_, i) => {
+      const key = `${roomDef.id}_${i}`;
+      const done = !!this.state.module2.task_progress[key];
+      const d = document.createElement('div');
+      d.className = `task-dot${done ? ' done' : (i === taskIdx ? ' current' : '')}`;
+      dotsEl.appendChild(d);
+    });
+    const content = document.getElementById('room-overlay-content');
+    content.innerHTML = '';
+    if (taskIdx === null) {
+      this._renderOverlayClearBanner(roomId, content, roomDef);
+      return;
+    }
+    const task = roomDef.tasks[taskIdx];
+    this.currentTask = taskIdx;
+    this.tapCount = 0;
+    this.findCount = 0;
+    const titleDiv = document.createElement('div');
+    titleDiv.style.cssText = 'font-size:1rem;color:rgba(255,244,224,0.7);font-weight:700;text-align:center';
+    titleDiv.textContent = task.title;
+    content.appendChild(titleDiv);
+    switch(task.type) {
+      case 'tap_count':   this._renderTapCountTask(task, content); break;
+      case 'kata_choice': this._renderChoiceTask(task, content); break;
+      case 'math_add':    this._renderMathTask(task, content); break;
+      case 'count':       this._renderCountTask(task, content); break;
+      case 'find_hidden': this._renderFindTask(task, content); break;
+      default: this._renderChoiceTask(task, content);
+    }
+    const feedbackEl = document.getElementById('room-overlay-feedback');
+    feedbackEl.className = 'hidden';
+  }
+
+  _renderOverlayClearBanner(roomId, content, roomDef) {
+    const stars = this.state.module2.room_stars[roomId] || 0;
+    const bannerDiv = document.createElement('div');
+    bannerDiv.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:16px;padding:20px 0;width:100%';
+    bannerDiv.innerHTML = `
+      <div style="font-size:72px">🎉</div>
+      <div style="font-size:2.5rem">${'⭐'.repeat(stars)}</div>
+      <div style="font-size:1.6rem;font-weight:900;color:var(--gold-lt);text-shadow:0 0 20px var(--gold)">${roomDef.name}クリア！</div>
+      <div style="font-size:1rem;opacity:0.8;text-align:center;line-height:1.6">すごい！よくできました！</div>
+    `;
+    const backBtn = document.createElement('button');
+    backBtn.style.cssText = 'width:200px;height:64px;border:none;border-radius:var(--radius);font-family:inherit;font-weight:900;font-size:1.1rem;background:linear-gradient(180deg,var(--gold),#8B6500);box-shadow:0 4px 0 #5a3f00;color:#fff;cursor:pointer;margin-top:8px;';
+    backBtn.textContent = '🏰 おしろにもどる';
+    backBtn.addEventListener('click', () => this._closeTaskOverlay());
+    bannerDiv.appendChild(backBtn);
+    content.appendChild(bannerDiv);
+  }
+
+  _closeTaskOverlay() {
+    this.inGameOverlay = false;
+    document.getElementById('room-overlay').classList.add('hidden');
+    this._startGameLoop();
+  }
+
+  _completeRoomOverlay(roomId) {
+    const roomDef = ROOM_DEFS.find(r => r.id === roomId);
+    if (this.state.module2.room_stars[roomId] === 0) {
+      this.state.module2.room_stars[roomId] = 1;
+      const roomIdx = ROOM_DEFS.findIndex(r => r.id === roomId);
+      if (roomIdx >= 0 && roomIdx < ROOM_DEFS.length - 1) {
+        const nextRoom = ROOM_DEFS[roomIdx + 1];
+        if (!this.state.module2.rooms_unlocked.includes(nextRoom.id)) {
+          this.state.module2.rooms_unlocked.push(nextRoom.id);
+          this._showToast(`🔓 ${nextRoom.icon} ${nextRoom.name} が かいほうされた！`, 3000);
+        }
+      }
+      this.saveState();
+    }
+    this.playSe('badge');
+    this._showPetals();
+    const content = document.getElementById('room-overlay-content');
+    content.innerHTML = '';
+    this._renderOverlayClearBanner(roomId, content, roomDef);
+  }
+
+  _bindDpad() {
+    if (this._dpadBound) return;
+    this._dpadBound = true;
+    const btnLeft = document.getElementById('btn-dpad-left');
+    const btnRight = document.getElementById('btn-dpad-right');
+    const onDown = (dir) => (e) => {
+      e.preventDefault();
+      this.input[dir] = true;
+      (dir === 'left' ? btnLeft : btnRight).classList.add('pressed');
+    };
+    const onUp = (dir) => (e) => {
+      e.preventDefault();
+      this.input[dir] = false;
+      (dir === 'left' ? btnLeft : btnRight).classList.remove('pressed');
+    };
+    ['pointerdown', 'touchstart'].forEach(evt => {
+      btnLeft.addEventListener(evt, onDown('left'), { passive: false });
+      btnRight.addEventListener(evt, onDown('right'), { passive: false });
+    });
+    ['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach(evt => {
+      btnLeft.addEventListener(evt, onUp('left'), { passive: false });
+      btnRight.addEventListener(evt, onUp('right'), { passive: false });
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') this.input.left = true;
+      if (e.key === 'ArrowRight') this.input.right = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft') this.input.left = false;
+      if (e.key === 'ArrowRight') this.input.right = false;
+    });
   }
 }
 

@@ -95,6 +95,28 @@
   <button class="btn-map-story" id="btn-map-story">📖 おはなし</button>
 </div>
 
+<!-- Game Screen (Castle Hallway) -->
+<div id="game-screen" class="hidden">
+  <canvas id="game-canvas"></canvas>
+  <div id="dpad">
+    <button id="btn-dpad-left" class="btn-dpad">◀</button>
+    <button id="btn-dpad-right" class="btn-dpad">▶</button>
+  </div>
+  <button id="enter-room-btn" class="hidden">はいる！</button>
+</div>
+
+<!-- Room Overlay -->
+<div id="room-overlay" class="hidden">
+  <div id="room-overlay-inner">
+    <div id="room-overlay-header">
+      <div id="room-overlay-title"></div>
+      <div id="room-overlay-dots"></div>
+    </div>
+    <div id="room-overlay-content"></div>
+    <div id="room-overlay-feedback" class="hidden"></div>
+  </div>
+</div>
+
 <!-- Room Screen -->
 <div id="room-screen" class="hidden">
   <div class="room-header">

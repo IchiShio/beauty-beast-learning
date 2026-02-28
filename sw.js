@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bblearn-v1';
+const CACHE_NAME = 'bblearn-v2';
 const STATIC_ASSETS = [
   './',
   './index.html',
