@@ -456,6 +456,14 @@ class BBGame {
     this.DOOR_ZONE_RADIUS = 80;
     this.BELLE_SPEED = 240;
     this.BELLE_HEIGHT = 80;
+    // Interactivity
+    this.particles = [];
+    this.collectibles = [];
+    this.sessionStars = 0;
+    this.beastBobPhase = 0;
+    this.belle.idleTimer = 0;
+    this.belle.collectBounce = 0;
+    this._canvasTapBound = false;
   }
 
   init() {
@@ -1672,6 +1680,8 @@ class BBGame {
     if (!this.currentBgm || this.currentBgm !== 'castle') this.playBgm('castle');
     this._resizeCanvas();
     this._bindDpad();
+    this._bindCanvasTap();
+    this._initCollectibles();
     this._startGameLoop();
   }
 
@@ -1729,6 +1739,17 @@ class BBGame {
     this.worldX = Math.max(0, Math.min(this.worldWidth - W, this.belle.x - W / 2));
     this.torchPhase += dt * 3;
     this._checkDoorProximity();
+    this.beastBobPhase += dt * 2;
+    if (this.input.left || this.input.right) {
+      this.belle.idleTimer = 0;
+    } else {
+      this.belle.idleTimer += dt;
+    }
+    if (this.belle.collectBounce > 0) {
+      this.belle.collectBounce = Math.max(0, this.belle.collectBounce - dt * 3);
+    }
+    this._updateParticles(dt);
+    this._checkCollect();
   }
 
   _renderWorld() {
@@ -1742,9 +1763,13 @@ class BBGame {
     ctx.clearRect(0, 0, W, H);
     this._drawBackground(ctx, W, H);
     this._drawFloor(ctx, W, H);
+    this._drawCollectibles(ctx, W, H);
     this._drawTorches(ctx, W, H);
     this._drawDoors(ctx, W, H);
+    this._drawBeast(ctx, W, H);
     this._drawBelle(ctx, W, H);
+    this._drawParticles(ctx);
+    this._drawHUD(ctx, W, H);
     ctx.restore();
   }
 
@@ -1869,6 +1894,10 @@ class BBGame {
         ctx.strokeStyle = `rgba(240,208,96,${0.5 + 0.3 * Math.sin(this.torchPhase * 2)})`;
         ctx.lineWidth = 3;
         ctx.strokeRect(x - 3, y - 3, doorW + 6, doorH + 6);
+        const allDone = room.tasks.every((_, i) =>
+          !!this.state.module2.task_progress[`${room.id}_${i}`]);
+        const bubbleText = allDone ? [`${room.icon} クリアずみ！`] : ['はいってみよう！', room.icon];
+        this._drawSpeechBubble(ctx, screenX, y - 15, bubbleText, 1);
       }
     });
   }
@@ -1876,7 +1905,9 @@ class BBGame {
   _drawBelle(ctx, W, H) {
     const floorY = H * 0.72;
     const belleScreenX = this.belle.x - this.worldX;
-    const bob = Math.sin(this.belle.bobPhase) * 4;
+    const collectBump = this.belle.collectBounce * -18;
+    const idleSparkle = this.belle.idleTimer > 2;
+    const bob = Math.sin(this.belle.bobPhase) * 4 + collectBump;
     const belleY = floorY - this.BELLE_HEIGHT / 2 + bob;
     ctx.save();
     if (!this.belle.facingRight) {
@@ -1893,6 +1924,15 @@ class BBGame {
     ctx.textBaseline = 'middle';
     ctx.fillText('👸', belleScreenX, belleY);
     ctx.restore();
+    if (idleSparkle) {
+      const t = performance.now() / 1000;
+      const orbitX = belleScreenX + Math.cos(t * 2) * 30;
+      const orbitY = belleY - 50 + Math.sin(t * 2) * 10;
+      ctx.font = '14px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✨', orbitX, orbitY);
+    }
   }
 
   _checkDoorProximity() {
@@ -1927,6 +1967,10 @@ class BBGame {
   }
 
   _enterRoom(roomId) {
+    const belleScreenX = this.belle.x - this.worldX;
+    const floorY = window.innerHeight * 0.72;
+    this._spawnParticles(belleScreenX, floorY - 40, 20,
+      ['#FFD700','#FF69B4','#87CEEB','#DDA0DD']);
     this._stopGameLoop();
     this._hideEnterBtn();
     this.inGameOverlay = true;
@@ -2066,6 +2110,209 @@ class BBGame {
       if (e.key === 'ArrowLeft')  this.input.left  = false;
       if (e.key === 'ArrowRight') this.input.right = false;
     });
+  }
+
+  // ===== PARTICLE SYSTEM =====
+  _spawnParticles(x, y, count = 12, colors = ['#FFD700','#FF69B4','#87CEEB','#98FB98']) {
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i / count) + Math.random() * 0.5;
+      const speed = 80 + Math.random() * 140;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 120,
+        life: 1.0,
+        decay: 1.5 + Math.random() * 1.5,
+        size: 5 + Math.random() * 6,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        shape: Math.random() < 0.5 ? 'circle' : 'star',
+      });
+    }
+  }
+
+  _updateParticles(dt) {
+    this.particles = this.particles.filter(p => {
+      p.x  += p.vx * dt;
+      p.y  += p.vy * dt;
+      p.vy += 380 * dt;
+      p.life -= p.decay * dt;
+      return p.life > 0;
+    });
+  }
+
+  _drawParticles(ctx) {
+    this.particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      if (p.shape === 'star') {
+        ctx.font = `${p.size * 2 * p.life + 4}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('✦', p.x, p.y);
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
+  // ===== COLLECTIBLES =====
+  _initCollectibles() {
+    const items = [
+      { wx: 200, type: '⭐' }, { wx: 490, type: '⭐' },
+      { wx: 580, type: '🌹' }, { wx: 830, type: '⭐' },
+      { wx: 950, type: '🌹' }, { wx: 1150, type: '⭐' },
+      { wx: 1310, type: '⭐' }, { wx: 1560, type: '🌹' },
+    ];
+    this.collectibles = items.map((item, i) => ({
+      ...item, collected: false, floatPhase: i * 0.8,
+    }));
+    this.sessionStars = 0;
+  }
+
+  _checkCollect() {
+    const floorY = window.innerHeight * 0.72;
+    this.collectibles.forEach(c => {
+      if (c.collected) return;
+      if (Math.abs(this.belle.x - c.wx) < 55) {
+        c.collected = true;
+        this.sessionStars++;
+        this.belle.collectBounce = 1.0;
+        const screenX = this.belle.x - this.worldX;
+        this._spawnParticles(screenX, floorY - 60, 14,
+          c.type === '⭐' ? ['#FFD700','#FFF0A0','#FFB800'] : ['#FF69B4','#FF1493','#FFB6C1']);
+        this.playSe('sparkle');
+      }
+    });
+  }
+
+  _drawCollectibles(ctx, W, H) {
+    const floorY = H * 0.72;
+    const t = performance.now() / 1000;
+    this.collectibles.forEach(c => {
+      if (c.collected) return;
+      const screenX = c.wx - this.worldX;
+      if (screenX < -60 || screenX > W + 60) return;
+      const floatY = floorY - 80 + Math.sin(t * 2 + c.floatPhase) * 10;
+      const grd = ctx.createRadialGradient(screenX, floatY, 0, screenX, floatY, 28);
+      grd.addColorStop(0, c.type === '⭐' ? 'rgba(255,215,0,0.35)' : 'rgba(255,105,180,0.35)');
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(screenX, floatY, 28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = '28px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(c.type, screenX, floatY);
+    });
+  }
+
+  // ===== BEAST NPC =====
+  _drawBeast(ctx, W, H) {
+    const floorY = H * 0.72;
+    const beastWorldX = this.worldWidth - 100;
+    const screenX = beastWorldX - this.worldX;
+    if (screenX < -100 || screenX > W + 100) return;
+    const bob = Math.sin(this.beastBobPhase) * 3;
+    const beastY = floorY - 40 + bob;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(screenX, floorY - 5, 26, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.save();
+    if (this.belle.x < beastWorldX) {
+      ctx.translate(screenX, beastY);
+      ctx.scale(-1, 1);
+      ctx.translate(-screenX, -beastY);
+    }
+    ctx.font = '68px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('👹', screenX, beastY);
+    ctx.restore();
+    const dist = Math.abs(this.belle.x - beastWorldX);
+    if (dist < 250) {
+      const alpha = Math.max(0, Math.min(1, (250 - dist) / 100));
+      const lines = dist < 120 ? ['はいってみろ！','💪'] : ['よく きたな！'];
+      this._drawSpeechBubble(ctx, screenX, beastY - 60, lines, alpha);
+    }
+  }
+
+  _drawSpeechBubble(ctx, cx, cy, lines, alpha = 1) {
+    const padding = 10;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 14px "M PLUS Rounded 1c", sans-serif';
+    const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+    const bw = maxW + padding * 2;
+    const bh = lines.length * 20 + padding * 2;
+    const bx = cx - bw / 2;
+    const by = cy - bh;
+    ctx.fillStyle = 'rgba(255,252,230,0.95)';
+    ctx.strokeStyle = '#c89800';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,252,230,0.95)';
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, by + bh);
+    ctx.lineTo(cx + 8, by + bh);
+    ctx.lineTo(cx, by + bh + 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#c89800';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, by + bh);
+    ctx.lineTo(cx, by + bh + 10);
+    ctx.lineTo(cx + 8, by + bh);
+    ctx.stroke();
+    ctx.fillStyle = '#3d1a00';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    lines.forEach((line, i) => ctx.fillText(line, cx, by + padding + i * 20));
+    ctx.restore();
+  }
+
+  // ===== CANVAS TAP SPARKLE =====
+  _bindCanvasTap() {
+    if (this._canvasTapBound) return;
+    this._canvasTapBound = true;
+    const canvas = document.getElementById('game-canvas');
+    canvas.addEventListener('pointerdown', (e) => {
+      if (this.inGameOverlay) return;
+      if (e.target !== canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      this._spawnParticles(x, y, 10, ['#FFD700','#FF69B4','#87CEEB','#98FB98','#DDA0DD']);
+      this.playSe('sparkle');
+    });
+  }
+
+  // ===== HUD =====
+  _drawHUD(ctx, W, H) {
+    if (this.sessionStars === 0) return;
+    ctx.save();
+    ctx.font = 'bold 18px "M PLUS Rounded 1c", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(45,27,105,0.75)';
+    ctx.beginPath();
+    ctx.roundRect(8, 8, 100, 34, 10);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,152,10,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(`⭐ × ${this.sessionStars}`, 16, 15);
+    ctx.restore();
   }
 }
 
