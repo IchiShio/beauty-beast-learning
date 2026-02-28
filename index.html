@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#2D1B69">
+  <title>魔法のお城で学ぼう！</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading-screen">
+  <div class="loading-rose">🌹</div>
+  <div class="loading-title">魔法のお城で<br>学ぼう！</div>
+  <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+  <div id="loading-text">よみこみちゅう...</div>
+</div>
+
+<!-- Title Screen -->
+<div id="title-screen" class="hidden">
+  <div class="title-castle">🏰</div>
+  <div class="title-logo">魔法のお城で<br>学ぼう！</div>
+  <div class="title-sub">カタカナ＆さんすう<br>しょうがく1ねんせい じゅんび</div>
+  <button class="btn-title btn-start" id="btn-start">▶ はじめる</button>
+  <button class="btn-title btn-continue hidden" id="btn-continue">つづきから</button>
+  <button class="btn-title btn-settings-t" id="btn-settings-title">⚙️ せってい</button>
+  <div class="title-chars">
+    <div class="title-char beast">👹</div>
+    <div class="title-char belle">👸</div>
+  </div>
+</div>
+
+<!-- Story Screen -->
+<div id="story-screen" class="hidden">
+  <div id="story-page-num">1 / 5</div>
+  <div id="story-panel">
+    <div id="story-char-area"></div>
+    <div id="story-text-area"></div>
+  </div>
+  <div id="story-word-hint">✨ ひからせよう！</div>
+  <div id="story-words-row"></div>
+  <div id="story-nav">
+    <button id="btn-story-prev" class="btn-story-nav">◀ まえ</button>
+    <button id="btn-story-next" class="btn-story-nav">つぎ ▶</button>
+  </div>
+  <div id="story-progress"></div>
+</div>
+
+<!-- Badge Screen -->
+<div id="badge-screen" class="hidden">
+  <div class="badge-sparkle">✨✨✨</div>
+  <div class="badge-icon">🗝️</div>
+  <div class="badge-title">魔法の鍵を<br>てに いれた！</div>
+  <div class="badge-desc">6つの ことばを<br>おぼえたね！</div>
+  <div class="badge-words" id="badge-words"></div>
+  <button class="btn-badge" id="btn-badge-ok">🏰 おしろへ！</button>
+</div>
+
+<!-- Map Screen -->
+<div id="map-screen" class="hidden">
+  <div class="map-title">🏰 魔法のお城</div>
+  <div id="map-grid">
+    <div class="room-card" id="room-ballroom" data-room="ballroom">
+      <div class="room-icon">💃</div>
+      <div class="room-name">ボールルーム</div>
+      <div class="room-stars" id="stars-ballroom">☆☆☆</div>
+      <div class="room-lock hidden" id="lock-ballroom">🔒</div>
+    </div>
+    <div class="room-card" id="room-dining" data-room="dining">
+      <div class="room-icon">🍽️</div>
+      <div class="room-name">ダイニング</div>
+      <div class="room-stars" id="stars-dining">☆☆☆</div>
+      <div class="room-lock" id="lock-dining">🔒</div>
+    </div>
+    <div class="room-card" id="room-library" data-room="library">
+      <div class="room-icon">📚</div>
+      <div class="room-name">としょしつ</div>
+      <div class="room-stars" id="stars-library">☆☆☆</div>
+      <div class="room-lock" id="lock-library">🔒</div>
+    </div>
+    <div class="room-card" id="room-westwing" data-room="westwing">
+      <div class="room-icon">🌹</div>
+      <div class="room-name">ひみつのにし</div>
+      <div class="room-stars" id="stars-westwing">☆☆☆</div>
+      <div class="room-lock" id="lock-westwing">🔒</div>
+    </div>
+  </div>
+  <div class="map-words-row" id="map-words"></div>
+  <button class="btn-map-story" id="btn-map-story">📖 おはなし</button>
+</div>
+
+<!-- Room Screen -->
+<div id="room-screen" class="hidden">
+  <div class="room-header">
+    <button id="btn-room-back" class="btn-back">← もどる</button>
+    <div id="room-title-bar">ボールルーム</div>
+    <div id="room-task-dots"></div>
+  </div>
+  <div id="room-content"></div>
+</div>
+
+<!-- Task Screen -->
+<div id="task-screen" class="hidden">
+  <div class="task-header">
+    <button id="btn-task-back" class="btn-back">← もどる</button>
+    <div id="task-title">もんだい</div>
+  </div>
+  <div id="task-content"></div>
+  <div id="task-feedback" class="hidden"></div>
+</div>
+
+<!-- Trace Screen (Canvas) -->
+<div id="trace-screen" class="hidden">
+  <div class="trace-header">
+    <button id="btn-trace-back" class="btn-back">← もどる</button>
+    <div id="trace-char-label">なぞろう：ビ</div>
+  </div>
+  <div class="trace-hint">かるく ゆびを おいて なぞってね！</div>
+  <div id="trace-canvas-wrap">
+    <canvas id="trace-canvas"></canvas>
+    <div id="trace-overlay" class="hidden"></div>
+  </div>
+  <div id="trace-fail-count" class="hidden">あと <span id="trace-fail-num">3</span>かいで ヒント</div>
+  <div class="trace-btns">
+    <button class="btn-trace" id="btn-trace-clear">🗑️ やりなおす</button>
+    <button class="btn-trace btn-trace-check" id="btn-trace-check">✓ たしかめる</button>
+  </div>
+</div>
+
+<!-- Word Pop (floating word balloon) -->
+<div id="word-pop" class="hidden">
+  <div class="word-pop-kata" id="word-pop-kata">ビースト</div>
+  <div class="word-pop-sub" id="word-pop-sub">Beast</div>
+</div>
+
+<!-- Settings Panel -->
+<div id="settings-panel" class="hidden">
+  <div class="settings-inner">
+    <div class="settings-title">⚙️ せってい</div>
+    <div class="settings-section">
+      <div class="settings-label">🎵 BGM おんりょう <span id="settings-bgm-val">50%</span></div>
+      <input type="range" class="settings-slider" id="settings-bgm" min="0" max="100" step="5" value="50">
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">🔔 こうかおん おんりょう <span id="settings-se-val">70%</span></div>
+      <input type="range" class="settings-slider" id="settings-se" min="0" max="100" step="5" value="70">
+    </div>
+    <div class="settings-section">
+      <button class="btn-settings-reset" id="btn-reset">🔄 さいしょから</button>
+    </div>
+    <button class="btn-settings-close" id="btn-settings-close">✓ とじる</button>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
