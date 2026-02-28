@@ -26,22 +26,24 @@ Beauty and Beastの世界観をテーマにした小1準備の知育Webアプリ
 | `audio/` | MP3音声ファイル（単語8個 + 数字20個） |
 
 ## 音声ファイル生成コマンド
+edge-tts（MS Edge TTS、`ja-JP-NanamiNeural`）で生成。pip install edge-tts 必要。
+
 ```bash
 cd ~/projects/claude/beauty-beast-learning/audio
+VOICE="ja-JP-NanamiNeural"
 # カタカナ語
-say -v Kyoko -o beast.aiff "ビースト" && ffmpeg -i beast.aiff -codec:a libmp3lame -qscale:a 4 kata_beast.mp3 -y
-say -v Kyoko -o bell.aiff "ベル" && ffmpeg -i bell.aiff -codec:a libmp3lame -qscale:a 4 kata_bell.mp3 -y
-say -v Kyoko -o ballroom.aiff "ボールルーム" && ffmpeg -i ballroom.aiff -codec:a libmp3lame -qscale:a 4 kata_ballroom.mp3 -y
-say -v Kyoko -o dance.aiff "ダンス" && ffmpeg -i dance.aiff -codec:a libmp3lame -qscale:a 4 kata_dance.mp3 -y
-say -v Kyoko -o party.aiff "パーティー" && ffmpeg -i party.aiff -codec:a libmp3lame -qscale:a 4 kata_party.mp3 -y
-say -v Kyoko -o rose.aiff "ローズ" && ffmpeg -i rose.aiff -codec:a libmp3lame -qscale:a 4 kata_rose.mp3 -y
-say -v Kyoko -o reddress.aiff "レッドドレス" && ffmpeg -i reddress.aiff -codec:a libmp3lame -qscale:a 4 kata_red_dress.mp3 -y
-say -v Kyoko -o bluedress.aiff "ブルードレス" && ffmpeg -i bluedress.aiff -codec:a libmp3lame -qscale:a 4 kata_blue_dress.mp3 -y
+edge-tts --voice $VOICE --text "ビースト" --write-media kata_beast.mp3
+edge-tts --voice $VOICE --text "ベル" --write-media kata_bell.mp3
+edge-tts --voice $VOICE --text "ボールルーム" --write-media kata_ballroom.mp3
+edge-tts --voice $VOICE --text "ダンス" --write-media kata_dance.mp3
+edge-tts --voice $VOICE --text "パーティー" --write-media kata_party.mp3
+edge-tts --voice $VOICE --text "ローズ" --write-media kata_rose.mp3
+edge-tts --voice $VOICE --text "レッドドレス" --write-media kata_red_dress.mp3
+edge-tts --voice $VOICE --text "ブルードレス" --write-media kata_blue_dress.mp3
 # 数字1〜20
 for i in $(seq 1 20); do
-  say -v Kyoko -o n${i}.aiff "${i}" && ffmpeg -i n${i}.aiff -codec:a libmp3lame -qscale:a 4 num_${i}.mp3 -y
+  edge-tts --voice $VOICE --text "${i}" --write-media num_${i}.mp3
 done
-rm -f *.aiff
 ```
 
 ## 状態管理（localStorage）
